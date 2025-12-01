@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="ru" x-data="app" x-cloak>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SRS Memorizer - Система интервальных повторений</title>
+    
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.0/dist/cdn.min.js"></script>
+    
+    <style>
+        [x-cloak] { display: none !important; }
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+        body {
+            background-color: #f8f9fa;
+            padding-top: 56px;
+        }
+        .mono {
+            font-family: 'Roboto Mono', monospace;
+        }
+        .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+        }
+        .form-control-sm, .form-select-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+            height: calc(1.5em + 0.5rem + 2px);
+        }
+        .card-hover:hover {
+            transform: translateY(-2px);
+            transition: transform 0.2s;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .nav-link.active {
+            font-weight: 600;
+            border-bottom: 2px solid #0d6efd;
+        }
+        .review-card {
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .stat-card {
+            border-left: 4px solid #0d6efd;
+        }
+        .deck-badge {
+            font-size: 0.7rem;
+            padding: 0.2rem 0.4rem;
+        }
+        .answer-hidden {
+            filter: blur(5px);
+            user-select: none;
+            cursor: pointer;
+        }
+        .answer-hidden:hover {
+            filter: blur(3px);
+        }
+        .difficulty-btn {
+            min-width: 80px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Навигация -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand fw-bold" href="#" @click.prevent="currentView = 'dashboard'">
+                <i class="fas fa-brain text-primary me-2"></i>SRS Memorizer
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" :class="{active: currentView === 'dashboard'}" 
+                           href="#" @click.prevent="currentView = 'dashboard'">
+                            <i class="fas fa-home me-1"></i>Колоды
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" :class="{active: currentView === 'stats'}" 
+                           href="#" @click.prevent="currentView = 'stats'">
+                            <i class="fas fa-chart-line me-1"></i>Статистика
+                        </a>
+                    </li>
+                </ul>
+                <div class="d-flex">
+                    <template x-if="currentView === 'dashboard'">
+                        <button class="btn btn-primary btn-sm me-2" @click="showNewDeckForm()">
+                            <i class="fas fa-plus me-1"></i>Новая колода
+                        </button>
+                    </template>
+                    <template x-if="currentView === 'dashboard' && currentDeckId">
+                        <button class="btn btn-success btn-sm" @click="showNewCardForm()">
+                            <i class="fas fa-plus me-1"></i>Добавить карточку
+                        </button>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Основной контент -->
+    <main class="container-fluid py-3">
+        <!-- Dashboard: Обзор колод -->
+        <template x-if="currentView === 'dashboard'">
+            <div>
+                <!-- Заголовок и кнопки -->
+                <div class="row mb-3">
+                    <div class="col">
+                        <h4 class="mb-0">
+                            <i class="fas fa-layer-group text-primary me-2"></i>
+                            <span x-text="currentDeckId ? getDeckById(currentDeckId)?.name : 'Мои колоды'"></span>
+                            <template x-if="currentDeckId">
+                                <button class="btn btn-sm btn-outline-secondary ms-2" @click="currentDeckId = null">
+                                    <i class="fas fa-arrow-left"></i>
+                                </button>
+                            </template>
+                        </h4>
+                        <small class="text-muted" x-show="!currentDeckId">
+                            Карточек для повторения сегодня: <span class="badge bg-primary" x-text="getTotalDueCards()"></span>
+                        </small>
+                        <small class="text-muted" x-show="currentDeckId">
+                            Карточек в колоде: <span class="badge bg-secondary" x-text="getDeckById(currentDeckId)?.cardCount || 0"></span>
+                            | Для повторения: <span class="badge bg-primary" x-text="getDueCardsForDeck(currentDeckId).length"></span>
+                        </small>
+                    </div>
+                    <div class="col-auto">
+                        <template x-if="!currentDeckId && getTotalDueCards() > 0">
+                            <button class="btn btn-primary btn-sm" @click="startReviewSession()">
+                                <i class="fas fa-play me-1"></i>Начать повторение (<span x-text="getTotalDueCards()"></span>)
+                            </button>
+                        </template>
+                        <template x-if="currentDeckId && getDueCardsForDeck(currentDeckId).length > 0">
+                            <button class="btn btn-primary btn-sm" @click="startReviewSession(currentDeckId)">
+                                <i class="fas fa-play me-1"></i>Повторить эту колоду (<span x-text="getDueCardsForDeck(currentDeckId).length"></span>)
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Список колод (если не выбрана конкретная) -->
+                <template x-if="!currentDeckId">
+                    <div class="row g-2">
+                        <template x-for="deck in decks" :key="deck.id">
+                            <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+                                <div class="card card-hover h-100">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <h6 class="card-title mb-0" x-text="deck.name"></h6>
+                                            <div class="dropdown">
+                                                <button class="btn btn-link text-muted p-0" type="button" data-bs-toggle="dropdown">
+                                                    <i class="fas fa-ellipsis-v"></i>
+                                                </button>
+                                                <ul class="dropdown-menu dropdown-menu-end">
+                                                    <li><a class="dropdown-item" href="#" @click.prevent="showDeck(deck.id)"><i class="fas fa-eye me-2"></i>Открыть</a></li>
+                                                    <li><a class="dropdown-item" href="#" @click.prevent="showEditDeckForm(deck.id)"><i class="fas fa-edit me-2"></i>Редактировать</a></li>
+                                                    <li><hr class="dropdown-divider"></li>
+                                                    <li><a class="dropdown-item text-danger" href="#" @click.prevent="deleteDeck(deck.id)"><i class="fas fa-trash me-2"></i>Удалить</a></li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                        <p class="card-text small text-muted mb-2" x-text="deck.description"></p>
+                                        <div class="d-flex flex-wrap gap-1 mb-2">
+                                            <template x-for="tag in deck.tags" :key="tag">
+                                                <span class="badge bg-light text-dark deck-badge" x-text="tag"></span>
+                                            </template>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <span class="badge bg-secondary" x-text="deck.cardCount + ' карт.'"></span>
+                                                <span class="badge bg-primary ms-1" x-text="deck.dueCount + ' на повторение'"></span>
+                                            </div>
+                                            <button class="btn btn-outline-primary btn-sm" @click="startReviewSession(deck.id)" :disabled="deck.dueCount === 0">
+                                                <i class="fas fa-play"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- Карточки в выбранной колоде -->
+                <template x-if="currentDeckId">
+                    <div>
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <div>
+                                    <button class="btn btn-sm btn-outline-primary me-2" @click="showNewCardForm()">
+                                        <i class="fas fa-plus me-1"></i>Добавить карточку
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" @click="showEditDeckForm(currentDeckId)">
+                                        <i class="fas fa-edit me-1"></i>Редактировать колоду
+                                    </button>
+                                </div>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-danger" @click="deleteDeck(currentDeckId)">
+                                        <i class="fas fa-trash me-1"></i>Удалить колоду
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <template x-if="cards[currentDeckId] && cards[currentDeckId].length > 0">
+                                    <div class="list-group list-group-flush">
+                                        <template x-for="card in cards[currentDeckId]" :key="card.id">
+                                            <div class="list-group-item list-group-item-action">
+                                                <div class="d-flex justify-content-between align-items-start">
+                                                    <div class="flex-grow-1">
+                                                        <div class="fw-bold mb-1" x-text="card.front"></div>
+                                                        <div class="text-muted small" x-text="card.back"></div>
+                                                        <div class="mt-2">
+                                                            <template x-for="tag in card.tags" :key="tag">
+                                                                <span class="badge bg-light text-dark deck-badge" x-text="tag"></span>
+                                                            </template>
+                                                        </div>
+                                                    </div>
+                                                    <div class="dropdown ms-3">
+                                                        <button class="btn btn-link text-muted p-0" type="button" data-bs-toggle="dropdown">
+                                                            <i class="fas fa-ellipsis-v"></i>
+                                                        </button>
+                                                        <ul class="dropdown-menu dropdown-menu-end">
+                                                            <li><a class="dropdown-item" href="#" @click.prevent="showEditCardForm(card.id)"><i class="fas fa-edit me-2"></i>Редактировать</a></li>
+                                                            <li><a class="dropdown-item text-danger" href="#" @click.prevent="deleteCard(card.id, currentDeckId)"><i class="fas fa-trash me-2"></i>Удалить</a></li>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                                <div class="d-flex justify-content-between align-items-center mt-2">
+                                                    <small class="text-muted">
+                                                        <i class="fas fa-redo me-1"></i>
+                                                        <span x-show="card.reviewCount === 0">Новая</span>
+                                                        <span x-show="card.reviewCount > 0">
+                                                            Повторений: <span x-text="card.reviewCount"></span>
+                                                            | Следующее: 
+                                                            <span class="mono" x-text="new Date(card.nextReview).toLocaleDateString()"></span>
+                                                        </span>
+                                                    </small>
+                                                    <small class="text-muted">
+                                                        EF: <span x-text="card.easeFactor.toFixed(2)"></span>
+                                                    </small>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <template x-if="!cards[currentDeckId] || cards[currentDeckId].length === 0">
+                                    <div class="text-center py-5">
+                                        <i class="fas fa-cards fa-3x text-muted mb-3"></i>
+                                        <p class="text-muted">В этой колоде пока нет карточек</p>
+                                        <button class="btn btn-primary btn-sm" @click="showNewCardForm()">
+                                            <i class="fas fa-plus me-1"></i>Добавить первую карточку
+                                        </button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+        <!-- Review: Сессия повторения -->
+        <template x-if="currentView === 'review'">
+            <div class="row justify-content-center">
+                <div class="col-12 col-md-8 col-lg-6">
+                    <div class="card shadow review-card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="badge bg-primary" x-text="reviewQueue.length + 1"></span>
+                                <span class="ms-2">из</span>
+                                <span class="ms-2" x-text="reviewQueue.length + (currentCardId ? 1 : 0)"></span>
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-outline-secondary" @click="currentView = 'dashboard'">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="card-body text-center p-5">
+                            <!-- Прогресс -->
+                            <div class="progress mb-4" style="height: 4px;">
+                                <div class="progress-bar" :style="'width: ' + ((reviewQueue.length / (reviewQueue.length + 1)) * 100) + '%'"></div>
+                            </div>
+                            
+                            <!-- Вопрос (Front карточки) -->
+                            <div class="mb-5">
+                                <h4 class="mb-4" x-text="getCardById(currentCardId, currentDeckId)?.front"></h4>
+                                
+                                <!-- Ответ (Back карточки) -->
+                                <div x-show="showAnswer">
+                                    <hr>
+                                    <h5 class="text-muted mb-4" x-text="getCardById(currentCardId, currentDeckId)?.back"></h5>
+                                </div>
+                                
+                                <!-- Кнопка показа ответа -->
+                                <div x-show="!showAnswer">
+                                    <button class="btn btn-outline-primary btn-lg mt-4" @click="revealAnswer()">
+                                        <i class="fas fa-eye me-2"></i>Показать ответ
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Кнопки оценки (появляются после показа ответа) -->
+                            <div x-show="showAnswer" class="mt-4">
+                                <div class="row g-2">
+                                    <div class="col">
+                                        <button class="btn btn-danger w-100 difficulty-btn" @click="processAnswer(0)">
+                                            <i class="fas fa-times me-2"></i>Снова<br>
+                                            <small class="opacity-75">(забыл)</small>
+                                        </button>
+                                    </div>
+                                    <div class="col">
+                                        <button class="btn btn-warning w-100 difficulty-btn" @click="processAnswer(1)">
+                                            <i class="fas fa-hard-hat me-2"></i>Трудно<br>
+                                            <small class="opacity-75">(вспомнил с трудом)</small>
+                                        </button>
+                                    </div>
+                                    <div class="col">
+                                        <button class="btn btn-info w-100 difficulty-btn" @click="processAnswer(2)">
+                                            <i class="fas fa-check me-2"></i>Хорошо<br>
+                                            <small class="opacity-75">(правильно)</small>
+                                        </button>
+                                    </div>
+                                    <div class="col">
+                                        <button class="btn btn-success w-100 difficulty-btn" @click="processAnswer(3)">
+                                            <i class="fas fa-bolt me-2"></i>Легко<br>
+                                            <small class="opacity-75">(мгновенно)</small>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="card-footer text-center">
+                            <small class="text-muted">
+                                <i class="fas fa-lightbulb me-1"></i>
+                                Оцените, насколько легко вы вспомнили ответ
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <!-- Deck Form: Форма колоды -->
+        <template x-if="currentView === 'deck-form'">
+            <div class="row justify-content-center">
+                <div class="col-12 col-md-8 col-lg-6">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-layer-group me-2"></i>
+                                <span x-text="editMode ? 'Редактирование колоды' : 'Новая колода'"></span>
+                            </h5>
+                            <button class="btn btn-sm btn-outline-secondary" @click="showDashboard()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <form @submit.prevent="saveDeck()">
+                                <div class="mb-3">
+                                    <label class="form-label">Название колоды *</label>
+                                    <input type="text" class="form-control form-control-sm" 
+                                           x-model="formData.deck.name" required maxlength="100">
+                                    <div class="form-text">Короткое и понятное название</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Описание</label>
+                                    <textarea class="form-control form-control-sm" rows="3" 
+                                              x-model="formData.deck.description" maxlength="500"></textarea>
+                                    <div class="form-text">Необязательное описание темы колоды</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Теги</label>
+                                    <input type="text" class="form-control form-control-sm" 
+                                           x-model="formData.deck.tags" placeholder="программирование, английский, математика">
+                                    <div class="form-text">Теги через запятую для удобного поиска</div>
+                                </div>
+                                
+                                <div class="d-flex justify-content-between">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @click="showDashboard()">
+                                        Отмена
+                                    </button>
+                                    <button type="submit" class="btn btn-primary btn-sm">
+                                        <i class="fas fa-save me-1"></i>
+                                        <span x-text="editMode ? 'Сохранить изменения' : 'Создать колоду'"></span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <!-- Card Form: Форма карточки -->
+        <template x-if="currentView === 'card-form'">
+            <div class="row justify-content-center">
+                <div class="col-12 col-md-8 col-lg-6">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-card me-2"></i>
+                                <span x-text="editMode ? 'Редактирование карточки' : 'Новая карточка'"></span>
+                            </h5>
+                            <button class="btn btn-sm btn-outline-secondary" @click="showDashboard()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <form @submit.prevent="saveCard()">
+                                <!-- Выбор колоды (только при создании новой карточки) -->
+                                <template x-if="!editMode">
+                                    <div class="mb-3">
+                                        <label class="form-label">Колода *</label>
+                                        <select class="form-select form-select-sm" x-model="formData.card.deckId" required>
+                                            <option value="">Выберите колоду</option>
+                                            <template x-for="deck in decks" :key="deck.id">
+                                                <option :value="deck.id" x-text="deck.name"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                </template>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Вопрос (лицевая сторона) *</label>
+                                    <textarea class="form-control form-control-sm" rows="3" 
+                                              x-model="formData.card.front" required maxlength="1000"></textarea>
+                                    <div class="form-text">То, что вы будете видеть первым при повторении</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Ответ (оборотная сторона) *</label>
+                                    <textarea class="form-control form-control-sm" rows="3" 
+                                              x-model="formData.card.back" required maxlength="1000"></textarea>
+                                    <div class="form-text">То, что вы должны вспомнить или узнать</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Теги</label>
+                                    <input type="text" class="form-control form-control-sm" 
+                                           x-model="formData.card.tags" placeholder="глаголы, времена, исключения">
+                                    <div class="form-text">Теги через запятую для организации внутри колоды</div>
+                                </div>
+                                
+                                <div class="d-flex justify-content-between">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @click="showDashboard()">
+                                        Отмена
+                                    </button>
+                                    <button type="submit" class="btn btn-primary btn-sm">
+                                        <i class="fas fa-save me-1"></i>
+                                        <span x-text="editMode ? 'Сохранить изменения' : 'Создать карточку'"></span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <!-- Stats: Статистика -->
+        <template x-if="currentView === 'stats'">
+            <div>
+                <div class="row mb-4">
+                    <div class="col">
+                        <h4><i class="fas fa-chart-line text-primary me-2"></i>Статистика</h4>
+                    </div>
+                </div>
+                
+                <!-- Общая статистика -->
+                <div class="row g-3 mb-4">
+                    <div class="col-6 col-md-3">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <h6 class="card-subtitle mb-2 text-muted">Всего колод</h6>
+                                <h3 class="card-title" x-text="decks.length"></h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <h6 class="card-subtitle mb-2 text-muted">Всего карточек</h6>
+                                <h3 class="card-title" x-text="getTotalCardsCount()"></h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <h6 class="card-subtitle mb-2 text-muted">Всего повторений</h6>
+                                <h3 class="card-title" x-text="getTotalReviewsCount()"></h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card stat-card">
+                            <div class="card-body">
+                                <h6 class="card-subtitle mb-2 text-muted">На повторение сегодня</h6>
+                                <h3 class="card-title" x-text="getTotalDueCards()"></h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Статистика за сегодня -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-calendar-day me-2"></i>Сегодня</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-4 text-center mb-3 mb-md-0">
+                                <div class="display-4 fw-bold" x-text="getTodayStats().total"></div>
+                                <div class="text-muted">карточек повторено</div>
+                            </div>
+                            <div class="col-md-8">
+                                <div class="row g-2">
+                                    <div class="col-3">
+                                        <div class="text-center p-2 bg-danger bg-opacity-10 rounded">
+                                            <div class="h4 mb-1" x-text="getTodayStats().byRating[0]"></div>
+                                            <div class="small">Снова</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="text-center p-2 bg-warning bg-opacity-10 rounded">
+                                            <div class="h4 mb-1" x-text="getTodayStats().byRating[1]"></div>
+                                            <div class="small">Трудно</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="text-center p-2 bg-info bg-opacity-10 rounded">
+                                            <div class="h4 mb-1" x-text="getTodayStats().byRating[2]"></div>
+                                            <div class="small">Хорошо</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="text-center p-2 bg-success bg-opacity-10 rounded">
+                                            <div class="h4 mb-1" x-text="getTodayStats().byRating[3]"></div>
+                                            <div class="small">Легко</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Информация по колодам -->
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-layer-group me-2"></i>Статистика по колодам</h6>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Колода</th>
+                                        <th class="text-center">Карточек</th>
+                                        <th class="text-center">На повторение</th>
+                                        <th class="text-center">Средний EF</th>
+                                        <th class="text-center">Всего повторений</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="deck in decks" :key="deck.id">
+                                        <tr>
+                                            <td>
+                                                <a href="#" @click.prevent="showDeck(deck.id)" x-text="deck.name"></a>
+                                            </td>
+                                            <td class="text-center" x-text="deck.cardCount"></td>
+                                            <td class="text-center">
+                                                <span class="badge" :class="deck.dueCount > 0 ? 'bg-primary' : 'bg-secondary'">
+                                                    <span x-text="deck.dueCount"></span>
+                                                </span>
+                                            </td>
+                                            <td class="text-center">
+                                                <span x-if="cards[deck.id] && cards[deck.id].length > 0">
+                                                    <span x-text="(cards[deck.id].reduce((sum, card) => sum + card.easeFactor, 0) / cards[deck.id].length).toFixed(2)"></span>
+                                                </span>
+                                                <span x-if="!cards[deck.id] || cards[deck.id].length === 0">-</span>
+                                            </td>
+                                            <td class="text-center">
+                                                <span x-if="cards[deck.id] && cards[deck.id].length > 0">
+                                                    <span x-text="cards[deck.id].reduce((sum, card) => sum + card.reviewCount, 0)"></span>
+                                                </span>
+                                                <span x-if="!cards[deck.id] || cards[deck.id].length === 0">-</span>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Кнопки управления -->
+                <div class="mt-4 text-center">
+                    <button class="btn btn-outline-secondary btn-sm me-2" @click="localStorage.clear(); location.reload()">
+                        <i class="fas fa-trash me-1"></i>Очистить все данные
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm" @click="saveToLocalStorage()">
+                        <i class="fas fa-save me-1"></i>Сохранить данные
+                    </button>
+                </div>
+            </div>
+        </template>
+    </main>
+
+    <script>
+        // Основное состояние приложения
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('app', () => ({
+                // Состояния UI
+                currentView: 'dashboard',
+                currentDeckId: null,
+                currentCardId: null,
+                showAnswer: false,
+                editMode: false,
+                
+                // Данные приложения
+                decks: [],
+                cards: {},
+                reviewQueue: [],
+                reviewHistory: [],
+                
+                // Данные формы
+                formData: {
+                    deck: {
+                        id: null,
+                        name: '',
+                        description: '',
+                        tags: ''
+                    },
+                    card: {
+                        id: null,
+                        deckId: null,
+                        front: '',
+                        back: '',
+                        tags: ''
+                    }
+                },
+                
+                // Инициализация приложения
+                init() {
+                    this.loadFromLocalStorage();
+                    this.setupDefaultData();
+                    
+                    // Автоматически переходить к повторению, если есть карточки для повторения
+                    if (this.getTotalDueCards() > 0 && window.location.hash === '#review') {
+                        this.startReviewSession();
+                    }
+                },
+                
+                // Загрузка данных из LocalStorage
+                loadFromLocalStorage() {
+                    const savedDecks = localStorage.getItem('srs_decks');
+                    const savedCards = localStorage.getItem('srs_cards');
+                    
+                    if (savedDecks) this.decks = JSON.parse(savedDecks);
+                    if (savedCards) this.cards = JSON.parse(savedCards);
+                },
+                
+                // Сохранение данных в LocalStorage
+                saveToLocalStorage() {
+                    localStorage.setItem('srs_decks', JSON.stringify(this.decks));
+                    localStorage.setItem('srs_cards', JSON.stringify(this.cards));
+                },
+                
+                // Настройка тестовых данных (если нет данных)
+                setupDefaultData() {
+                    if (this.decks.length === 0) {
+                        this.decks = [
+                            {
+                                id: '1',
+                                name: 'Основы программирования',
+                                description: 'Базовые концепции программирования',
+                                tags: ['программирование', 'базовые'],
+                                createdAt: Date.now(),
+                                cardCount: 0
+                            },
+                            {
+                                id: '2',
+                                name: 'Английские слова',
+                                description: 'Наиболее употребимые слова',
+                                tags: ['английский', 'языки'],
+                                createdAt: Date.now(),
+                                cardCount: 0
+                            }
+                        ];
+                        this.saveToLocalStorage();
+                    }
+                    
+                    // Инициализируем объект cards для каждой колоды
+                    this.decks.forEach(deck => {
+                        if (!this.cards[deck.id]) {
+                            this.cards[deck.id] = [];
+                        }
+                    });
+                    
+                    // Обновляем счетчики карточек
+                    this.updateDeckCounts();
+                },
+                
+                // Обновление счетчиков карточек в колодах
+                updateDeckCounts() {
+                    this.decks.forEach(deck => {
+                        deck.cardCount = this.cards[deck.id]?.length || 0;
+                        deck.dueCount = this.getDueCardsForDeck(deck.id).length;
+                    });
+                },
+                
+                // Генерация ID
+                generateId() {
+                    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+                },
+                
+                // Получение текущей даты
+                getToday() {
+                    const now = new Date();
+                    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+                },
+                
+                // Получение карточек для повторения в колоде
+                getDueCardsForDeck(deckId) {
+                    const today = this.getToday();
+                    return (this.cards[deckId] || []).filter(card => {
+                        return !card.nextReview || card.nextReview <= today;
+                    });
+                },
+                
+                // Общее количество карточек для повторения
+                getTotalDueCards() {
+                    return this.decks.reduce((total, deck) => {
+                        return total + this.getDueCardsForDeck(deck.id).length;
+                    }, 0);
+                },
+                
+                // Получение объекта колоды по ID
+                getDeckById(deckId) {
+                    return this.decks.find(deck => deck.id === deckId);
+                },
+                
+                // Получение объекта карточки по ID
+                getCardById(cardId, deckId) {
+                    return this.cards[deckId]?.find(card => card.id === cardId);
+                },
+                
+                // Навигационные методы
+                showDashboard() {
+                    this.currentView = 'dashboard';
+                    this.currentDeckId = null;
+                },
+                
+                showDeck(deckId) {
+                    this.currentDeckId = deckId;
+                    this.currentView = 'dashboard';
+                },
+                
+                showNewDeckForm() {
+                    this.formData.deck = {
+                        id: null,
+                        name: '',
+                        description: '',
+                        tags: ''
+                    };
+                    this.editMode = false;
+                    this.currentView = 'deck-form';
+                },
+                
+                showEditDeckForm(deckId) {
+                    const deck = this.getDeckById(deckId);
+                    if (deck) {
+                        this.formData.deck = { ...deck };
+                        this.editMode = true;
+                        this.currentView = 'deck-form';
+                    }
+                },
+                
+                showNewCardForm() {
+                    if (!this.currentDeckId) return;
+                    
+                    this.formData.card = {
+                        id: null,
+                        deckId: this.currentDeckId,
+                        front: '',
+                        back: '',
+                        tags: ''
+                    };
+                    this.editMode = false;
+                    this.currentView = 'card-form';
+                },
+                
+                showEditCardForm(cardId) {
+                    const card = this.getCardById(cardId, this.currentDeckId);
+                    if (card) {
+                        this.formData.card = { ...card };
+                        this.editMode = true;
+                        this.currentView = 'card-form';
+                    }
+                },
+                
+                showStats() {
+                    this.currentView = 'stats';
+                },
+                
+                // Методы для работы с колодами
+                saveDeck() {
+                    const deckData = this.formData.deck;
+                    
+                    if (!deckData.name.trim()) {
+                        alert('Название колоды обязательно');
+                        return;
+                    }
+                    
+                    if (this.editMode && deckData.id) {
+                        // Редактирование существующей колоды
+                        const index = this.decks.findIndex(d => d.id === deckData.id);
+                        if (index !== -1) {
+                            this.decks[index] = {
+                                ...this.decks[index],
+                                name: deckData.name,
+                                description: deckData.description,
+                                tags: deckData.tags.split(',').map(tag => tag.trim()).filter(tag => tag)
+                            };
+                        }
+                    } else {
+                        // Создание новой колоды
+                        const newDeck = {
+                            id: this.generateId(),
+                            name: deckData.name,
+                            description: deckData.description,
+                            tags: deckData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
+                            createdAt: Date.now(),
+                            cardCount: 0
+                        };
+                        this.decks.push(newDeck);
+                        this.cards[newDeck.id] = [];
+                    }
+                    
+                    this.saveToLocalStorage();
+                    this.updateDeckCounts();
+                    this.showDashboard();
+                },
+                
+                deleteDeck(deckId) {
+                    if (confirm('Удалить колоду и все карточки в ней?')) {
+                        this.decks = this.decks.filter(deck => deck.id !== deckId);
+                        delete this.cards[deckId];
+                        this.saveToLocalStorage();
+                        this.updateDeckCounts();
+                        if (this.currentDeckId === deckId) {
+                            this.currentDeckId = null;
+                        }
+                    }
+                },
+                
+                // Методы для работы с карточками
+                saveCard() {
+                    const cardData = this.formData.card;
+                    
+                    if (!cardData.front.trim() || !cardData.back.trim()) {
+                        alert('Обе стороны карточки должны быть заполнены');
+                        return;
+                    }
+                    
+                    if (!cardData.deckId) {
+                        alert('Выберите колоду');
+                        return;
+                    }
+                    
+                    const today = this.getToday();
+                    
+                    if (this.editMode && cardData.id) {
+                        // Редактирование существующей карточки
+                        const deckCards = this.cards[cardData.deckId];
+                        const index = deckCards.findIndex(c => c.id === cardData.id);
+                        if (index !== -1) {
+                            deckCards[index] = {
+                                ...deckCards[index],
+                                front: cardData.front,
+                                back: cardData.back,
+                                tags: cardData.tags.split(',').map(tag => tag.trim()).filter(tag => tag)
+                            };
+                        }
+                    } else {
+                        // Создание новой карточки
+                        const newCard = {
+                            id: this.generateId(),
+                            deckId: cardData.deckId,
+                            front: cardData.front,
+                            back: cardData.back,
+                            tags: cardData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
+                            createdAt: Date.now(),
+                            // Параметры SRS
+                            interval: 0,
+                            easeFactor: 2.5,
+                            reviewCount: 0,
+                            nextReview: today, // Показать сегодня
+                            lastReview: null
+                        };
+                        
+                        if (!this.cards[cardData.deckId]) {
+                            this.cards[cardData.deckId] = [];
+                        }
+                        this.cards[cardData.deckId].push(newCard);
+                    }
+                    
+                    this.saveToLocalStorage();
+                    this.updateDeckCounts();
+                    this.showDashboard();
+                },
+                
+                deleteCard(cardId, deckId) {
+                    if (confirm('Удалить карточку?')) {
+                        this.cards[deckId] = this.cards[deckId].filter(card => card.id !== cardId);
+                        this.saveToLocalStorage();
+                        this.updateDeckCounts();
+                    }
+                },
+                
+                // Методы для сессии повторения
+                startReviewSession(deckId = null) {
+                    this.reviewQueue = [];
+                    this.showAnswer = false;
+                    
+                    if (deckId) {
+                        // Повторение конкретной колоды
+                        this.reviewQueue = this.getDueCardsForDeck(deckId);
+                        this.currentDeckId = deckId;
+                    } else {
+                        // Повторение всех карточек
+                        this.decks.forEach(deck => {
+                            this.reviewQueue.push(...this.getDueCardsForDeck(deck.id));
+                        });
+                    }
+                    
+                    if (this.reviewQueue.length === 0) {
+                        alert('Нет карточек для повторения!');
+                        return;
+                    }
+                    
+                    // Перемешиваем очередь
+                    this.reviewQueue.sort(() => Math.random() - 0.5);
+                    this.currentCardId = this.reviewQueue[0]?.id;
+                    this.currentView = 'review';
+                },
+                
+                // Показать ответ
+                revealAnswer() {
+                    this.showAnswer = true;
+                },
+                
+                // Обработка ответа (алгоритм SRS)
+                processAnswer(rating) {
+                    if (!this.currentCardId || !this.currentDeckId) return;
+                    
+                    const deckId = this.currentDeckId;
+                    const cardId = this.currentCardId;
+                    const card = this.getCardById(cardId, deckId);
+                    
+                    if (!card) return;
+                    
+                    const today = this.getToday();
+                    const MS_IN_DAY = 24 * 60 * 60 * 1000;
+                    
+                    // Сохраняем историю
+                    this.reviewHistory.push({
+                        cardId,
+                        deckId,
+                        rating,
+                        date: today,
+                        previousInterval: card.interval
+                    });
+                    
+                    // Алгоритм SRS (упрощенный SM-2)
+                    let newInterval = 0;
+                    let newEaseFactor = card.easeFactor;
+                    
+                    if (rating < 2) {
+                        // Снова (0) или Трудно (1) - сброс или маленький интервал
+                        newInterval = rating === 0 ? 1 : Math.max(1, Math.floor(card.interval * 1.2));
+                        if (rating === 0) {
+                            newEaseFactor = Math.max(1.3, card.easeFactor - 0.2);
+                        }
+                    } else {
+                        // Хорошо (2) или Легко (3)
+                        if (card.reviewCount === 0) {
+                            // Первое повторение
+                            const firstIntervals = [1, 3, 7, 16];
+                            newInterval = firstIntervals[Math.min(rating - 1, 3)];
+                        } else {
+                            newInterval = Math.floor(card.interval * card.easeFactor);
+                            if (rating === 3) {
+                                newInterval = Math.floor(newInterval * 1.3);
+                            }
+                        }
+                        newEaseFactor = Math.min(2.5, card.easeFactor + 0.1);
+                    }
+                    
+                    // Обновляем карточку
+                    const cardIndex = this.cards[deckId].findIndex(c => c.id === cardId);
+                    if (cardIndex !== -1) {
+                        this.cards[deckId][cardIndex] = {
+                            ...card,
+                            interval: newInterval,
+                            easeFactor: newEaseFactor,
+                            reviewCount: card.reviewCount + 1,
+                            lastReview: today,
+                            nextReview: today + (newInterval * MS_IN_DAY)
+                        };
+                    }
+                    
+                    // Удаляем карточку из очереди
+                    this.reviewQueue = this.reviewQueue.filter(card => card.id !== cardId);
+                    
+                    // Переходим к следующей карточке или завершаем сессию
+                    if (this.reviewQueue.length > 0) {
+                        this.currentCardId = this.reviewQueue[0].id;
+                        this.showAnswer = false;
+                    } else {
+                        // Сессия завершена
+                        this.saveToLocalStorage();
+                        this.updateDeckCounts();
+                        this.currentView = 'dashboard';
+                        this.showAnswer = false;
+                    }
+                },
+                
+                // Методы статистики
+                getTodayStats() {
+                    const today = this.getToday();
+                    const todayReviews = this.reviewHistory.filter(r => r.date === today);
+                    
+                    return {
+                        total: todayReviews.length,
+                        byRating: {
+                            0: todayReviews.filter(r => r.rating === 0).length,
+                            1: todayReviews.filter(r => r.rating === 1).length,
+                            2: todayReviews.filter(r => r.rating === 2).length,
+                            3: todayReviews.filter(r => r.rating === 3).length
+                        }
+                    };
+                },
+                
+                getTotalCardsCount() {
+                    return Object.values(this.cards).reduce((total, deckCards) => total + deckCards.length, 0);
+                },
+                
+                getTotalReviewsCount() {
+                    return this.reviewHistory.length;
+                }
+            }));
+        });
+    </script>
+
+    <!-- Bootstrap JS (для dropdown) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // Инициализация Bootstrap компонентов при загрузке
+        document.addEventListener('DOMContentLoaded', function() {
+            // Активация всех dropdown элементов
+            var dropdownElementList = [].slice.call(document.querySelectorAll('.dropdown-toggle'));
+            var dropdownList = dropdownElementList.map(function (dropdownToggleEl) {
+                return new bootstrap.Dropdown(dropdownToggleEl);
+            });
+        });
+    </script>
+</body>
+</html>
