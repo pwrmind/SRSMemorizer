@@ -71,6 +71,9 @@
         .difficulty-btn {
             min-width: 80px;
         }
+        .modal-backdrop {
+            background-color: rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body>
@@ -100,9 +103,27 @@
                 </ul>
                 <div class="d-flex">
                     <template x-if="currentView === 'dashboard'">
-                        <button class="btn btn-primary btn-sm me-2" @click="showNewDeckForm()">
-                            <i class="fas fa-plus me-1"></i>Новая колода
-                        </button>
+                        <div class="btn-group me-2">
+                            <button class="btn btn-primary btn-sm" @click="showNewDeckForm()">
+                                <i class="fas fa-plus me-1"></i>Новая колода
+                            </button>
+                            <button type="button" class="btn btn-primary btn-sm dropdown-toggle dropdown-toggle-split" 
+                                    data-bs-toggle="dropdown">
+                                <span class="visually-hidden">Меню колод</span>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li>
+                                    <a class="dropdown-item" href="#" @click.prevent="showImportModal('deck')">
+                                        <i class="fas fa-file-import me-2"></i>Импортировать колоду
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="dropdown-item" href="#" @click.prevent="exportAllDecks()">
+                                        <i class="fas fa-download me-2"></i>Экспорт всех данных
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
                     </template>
                     <template x-if="currentView === 'dashboard' && currentDeckId">
                         <button class="btn btn-success btn-sm" @click="showNewCardForm()">
@@ -169,6 +190,7 @@
                                                 <ul class="dropdown-menu dropdown-menu-end">
                                                     <li><a class="dropdown-item" href="#" @click.prevent="showDeck(deck.id)"><i class="fas fa-eye me-2"></i>Открыть</a></li>
                                                     <li><a class="dropdown-item" href="#" @click.prevent="showEditDeckForm(deck.id)"><i class="fas fa-edit me-2"></i>Редактировать</a></li>
+                                                    <li><a class="dropdown-item" href="#" @click.prevent="exportDeck(deck.id)"><i class="fas fa-file-export me-2"></i>Экспортировать</a></li>
                                                     <li><hr class="dropdown-divider"></li>
                                                     <li><a class="dropdown-item text-danger" href="#" @click.prevent="deleteDeck(deck.id)"><i class="fas fa-trash me-2"></i>Удалить</a></li>
                                                 </ul>
@@ -236,6 +258,7 @@
                                                         </button>
                                                         <ul class="dropdown-menu dropdown-menu-end">
                                                             <li><a class="dropdown-item" href="#" @click.prevent="showEditCardForm(card.id)"><i class="fas fa-edit me-2"></i>Редактировать</a></li>
+                                                            <li><a class="dropdown-item" href="#" @click.prevent="exportToAnkiFormat(currentDeckId)"><i class="fas fa-share me-2"></i>Экспорт в Anki</a></li>
                                                             <li><a class="dropdown-item text-danger" href="#" @click.prevent="deleteCard(card.id, currentDeckId)"><i class="fas fa-trash me-2"></i>Удалить</a></li>
                                                         </ul>
                                                     </div>
@@ -616,16 +639,125 @@
                 
                 <!-- Кнопки управления -->
                 <div class="mt-4 text-center">
-                    <button class="btn btn-outline-secondary btn-sm me-2" @click="localStorage.clear(); location.reload()">
-                        <i class="fas fa-trash me-1"></i>Очистить все данные
-                    </button>
-                    <button class="btn btn-outline-primary btn-sm" @click="saveToLocalStorage()">
-                        <i class="fas fa-save me-1"></i>Сохранить данные
-                    </button>
+                    <div class="btn-group">
+                        <button class="btn btn-outline-primary btn-sm" @click="showImportModal('backup')">
+                            <i class="fas fa-file-import me-1"></i>Импорт резервной копии
+                        </button>
+                        <button class="btn btn-outline-success btn-sm" @click="exportAllDecks()">
+                            <i class="fas fa-download me-1"></i>Экспорт всех данных
+                        </button>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-outline-secondary btn-sm me-2" @click="localStorage.clear(); location.reload()">
+                            <i class="fas fa-trash me-1"></i>Очистить все данные
+                        </button>
+                        <button class="btn btn-outline-primary btn-sm" @click="saveToLocalStorage()">
+                            <i class="fas fa-save me-1"></i>Сохранить данные
+                        </button>
+                    </div>
                 </div>
             </div>
         </template>
     </main>
+
+    <!-- Модальное окно импорта -->
+    <div class="modal fade" :class="{show: importModal.show, 'd-block': importModal.show}" 
+         x-show="importModal.show" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-file-import me-2"></i>
+                        <span x-text="importModal.mode === 'deck' ? 'Импорт колоды' : 'Импорт резервной копии'"></span>
+                    </h5>
+                    <button type="button" class="btn-close" @click="hideImportModal()"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Ошибки валидации -->
+                    <template x-if="importModal.validationErrors.length > 0">
+                        <div class="alert alert-danger">
+                            <h6 class="alert-heading"><i class="fas fa-exclamation-triangle me-2"></i>Ошибки валидации:</h6>
+                            <ul class="mb-0">
+                                <template x-for="error in importModal.validationErrors" :key="error">
+                                    <li x-text="error"></li>
+                                </template>
+                            </ul>
+                        </div>
+                    </template>
+                    
+                    <!-- Загрузка файла -->
+                    <div class="mb-3">
+                        <label class="form-label">Выберите JSON файл</label>
+                        <input type="file" class="form-control form-control-sm" 
+                               accept=".json" 
+                               @change="handleFileUpload($event)">
+                        <div class="form-text">
+                            <template x-if="importModal.mode === 'deck'">
+                                Выберите файл экспортированной колоды (.json)
+                            </template>
+                            <template x-if="importModal.mode === 'backup'">
+                                Выберите файл резервной копии (.json)
+                            </template>
+                        </div>
+                    </div>
+                    
+                    <!-- Информация о загруженном файле -->
+                    <template x-if="importModal.fileContent">
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle me-2"></i>
+                            Файл успешно загружен!
+                            <div class="small mt-1">
+                                Тип: <span x-text="importModal.fileContent.exportType === 'single_deck' ? 'Колода' : 'Резервная копия'"></span><br>
+                                Дата экспорта: <span x-text="new Date(importModal.fileContent.exportedAt).toLocaleString()"></span>
+                                <template x-if="importModal.fileContent.exportType === 'single_deck'">
+                                    <br>Колода: <strong x-text="importModal.fileContent.data.deck.name"></strong>
+                                    <br>Карточек: <strong x-text="importModal.fileContent.data.cards.length"></strong>
+                                </template>
+                                <template x-if="importModal.fileContent.exportType === 'full_backup'">
+                                    <br>Колод: <strong x-text="importModal.fileContent.data.decks.length"></strong>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    
+                    <!-- Настройки импорта -->
+                    <div class="mb-3">
+                        <h6><i class="fas fa-cog me-2"></i>Настройки импорта</h6>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" 
+                                   x-model="importModal.importOptions.mergeDuplicates" id="mergeCheck">
+                            <label class="form-check-label" for="mergeCheck">
+                                Объединить с существующими данными
+                            </label>
+                            <div class="form-text">
+                                Если отключено, текущие данные будут удалены
+                            </div>
+                        </div>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" 
+                                   x-model="importModal.importOptions.preserveProgress" id="progressCheck">
+                            <label class="form-check-label" for="progressCheck">
+                                Сохранить прогресс обучения
+                            </label>
+                            <div class="form-text">
+                                Сохранить интервалы повторений и статистику
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" @click="hideImportModal()">
+                        Отмена
+                    </button>
+                    <button type="button" class="btn btn-primary btn-sm" 
+                            @click="performImport()"
+                            :disabled="!importModal.fileContent">
+                        <i class="fas fa-upload me-1"></i>Импортировать
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script>
         // Основное состояние приложения
@@ -637,6 +769,18 @@
                 currentCardId: null,
                 showAnswer: false,
                 editMode: false,
+                
+                // Состояние для модального окна импорта
+                importModal: {
+                    show: false,
+                    mode: 'deck', // 'deck' или 'backup'
+                    fileContent: null,
+                    validationErrors: [],
+                    importOptions: {
+                        mergeDuplicates: true,
+                        preserveProgress: false
+                    }
+                },
                 
                 // Данные приложения
                 decks: [],
@@ -722,7 +866,7 @@
                     this.updateDeckCounts();
                 },
                 
-                // Обновление счетчиков карточек в колодах
+                // Обновление счетчиков карточек в колодам
                 updateDeckCounts() {
                     this.decks.forEach(deck => {
                         deck.cardCount = this.cards[deck.id]?.length || 0;
@@ -822,6 +966,378 @@
                 
                 showStats() {
                     this.currentView = 'stats';
+                },
+                
+                // Функции импорта/экспорта
+                showImportModal(mode = 'deck') {
+                    this.importModal.show = true;
+                    this.importModal.mode = mode;
+                    this.importModal.fileContent = null;
+                    this.importModal.validationErrors = [];
+                },
+                
+                hideImportModal() {
+                    this.importModal.show = false;
+                },
+                
+                // Обработка загруженного файла
+                handleFileUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    
+                    if (!file.name.endsWith('.json')) {
+                        this.importModal.validationErrors = ['Файл должен быть в формате JSON'];
+                        return;
+                    }
+                    
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const content = JSON.parse(e.target.result);
+                            const validation = this.validateImportData(content, this.importModal.mode);
+                            
+                            if (validation.isValid) {
+                                this.importModal.fileContent = content;
+                                this.importModal.validationErrors = [];
+                                
+                                // Автоматическое определение типа импорта
+                                if (content.exportType === 'full_backup' && this.importModal.mode === 'deck') {
+                                    this.importModal.mode = 'backup';
+                                }
+                            } else {
+                                this.importModal.validationErrors = validation.errors;
+                                this.importModal.fileContent = null;
+                            }
+                        } catch (error) {
+                            this.importModal.validationErrors = ['Ошибка при чтении файла: ' + error.message];
+                        }
+                    };
+                    reader.readAsText(file);
+                },
+                
+                // Валидация данных импорта
+                validateImportData(data, expectedType) {
+                    const errors = [];
+                    
+                    // Проверка базовой структуры
+                    if (!data || typeof data !== 'object') {
+                        errors.push('Некорректный формат файла');
+                        return { isValid: false, errors };
+                    }
+                    
+                    // Проверка версии формата
+                    if (!data.formatVersion || data.formatVersion !== '1.0') {
+                        errors.push('Неподдерживаемая версия формата');
+                    }
+                    
+                    // Проверка типа экспорта
+                    if (!data.exportType) {
+                        errors.push('Отсутствует информация о типе экспорта');
+                    } else if (expectedType === 'deck' && data.exportType !== 'single_deck') {
+                        errors.push('Файл не является экспортом отдельной колоды');
+                    } else if (expectedType === 'backup' && data.exportType !== 'full_backup') {
+                        errors.push('Файл не является полной резервной копией');
+                    }
+                    
+                    // Проверка наличия данных
+                    if (!data.data) {
+                        errors.push('Отсутствуют данные для импорта');
+                    }
+                    
+                    // Проверка структуры для колоды
+                    if (data.exportType === 'single_deck') {
+                        if (!data.data.deck || !data.data.cards) {
+                            errors.push('Некорректная структура данных колоды');
+                        }
+                    }
+                    
+                    // Проверка структуры для резервной копии
+                    if (data.exportType === 'full_backup') {
+                        if (!Array.isArray(data.data.decks) || typeof data.data.cards !== 'object') {
+                            errors.push('Некорректная структура резервной копии');
+                        }
+                    }
+                    
+                    return {
+                        isValid: errors.length === 0,
+                        errors
+                    };
+                },
+                
+                // Выполнение импорта
+                performImport() {
+                    if (!this.importModal.fileContent) {
+                        alert('Сначала загрузите файл');
+                        return;
+                    }
+                    
+                    const data = this.importModal.fileContent;
+                    
+                    if (data.exportType === 'single_deck') {
+                        this.importDeckData(data.data);
+                    } else if (data.exportType === 'full_backup') {
+                        this.importBackupData(data.data);
+                    }
+                    
+                    this.hideImportModal();
+                    this.saveToLocalStorage();
+                    this.updateDeckCounts();
+                    
+                    // Показать уведомление об успехе
+                    this.showNotification('Импорт успешно завершен!', 'success');
+                },
+                
+                // Импорт отдельной колоды
+                importDeckData(importData) {
+                    const deckData = importData.deck;
+                    const cardsData = importData.cards || [];
+                    
+                    // Генерируем новые ID для избежания конфликтов
+                    const newDeckId = this.generateId();
+                    const idMap = {}; // Карта соответствия старых ID новым
+                    
+                    // Создаем новую колоду
+                    const newDeck = {
+                        ...deckData,
+                        id: newDeckId,
+                        createdAt: Date.now(),
+                        cardCount: cardsData.length,
+                        dueCount: 0
+                    };
+                    
+                    // Добавляем колоду
+                    this.decks.push(newDeck);
+                    
+                    // Создаем массив для карточек новой колоды
+                    this.cards[newDeckId] = [];
+                    
+                    // Импортируем карточки
+                    cardsData.forEach(card => {
+                        const newCardId = this.generateId();
+                        idMap[card.id] = newCardId;
+                        
+                        const today = this.getToday();
+                        const MS_IN_DAY = 24 * 60 * 60 * 1000;
+                        
+                        const newCard = {
+                            ...card,
+                            id: newCardId,
+                            deckId: newDeckId,
+                            // Сбрасываем или сохраняем прогресс в зависимости от настроек
+                            interval: this.importModal.importOptions.preserveProgress ? card.interval : 0,
+                            easeFactor: this.importModal.importOptions.preserveProgress ? card.easeFactor : 2.5,
+                            reviewCount: this.importModal.importOptions.preserveProgress ? card.reviewCount : 0,
+                            nextReview: this.importModal.importOptions.preserveProgress ? card.nextReview : today,
+                            lastReview: this.importModal.importOptions.preserveProgress ? card.lastReview : null,
+                            createdAt: Date.now()
+                        };
+                        
+                        this.cards[newDeckId].push(newCard);
+                    });
+                    
+                    this.showNotification(`Импортирована колода "${newDeck.name}" с ${cardsData.length} карточками`, 'success');
+                },
+                
+                // Импорт резервной копии
+                importBackupData(importData) {
+                    const decksData = importData.decks || [];
+                    const cardsData = importData.cards || {};
+                    
+                    // Если выбрано слияние, спрашиваем подтверждение
+                    if (this.decks.length > 0 && !this.importModal.importOptions.mergeDuplicates) {
+                        if (!confirm('Текущие данные будут удалены. Продолжить?')) {
+                            return;
+                        }
+                        this.decks = [];
+                        this.cards = {};
+                    }
+                    
+                    const idMap = {}; // Карта соответствия старых ID новым для колод
+                    
+                    // Импортируем колоды
+                    decksData.forEach(deck => {
+                        const newDeckId = this.generateId();
+                        idMap[deck.id] = newDeckId;
+                        
+                        const newDeck = {
+                            ...deck,
+                            id: newDeckId,
+                            createdAt: Date.now(),
+                            cardCount: 0, // Будет обновлено после импорта карточек
+                            dueCount: 0
+                        };
+                        
+                        this.decks.push(newDeck);
+                        this.cards[newDeckId] = [];
+                    });
+                    
+                    // Импортируем карточки
+                    Object.keys(cardsData).forEach(oldDeckId => {
+                        const newDeckId = idMap[oldDeckId];
+                        if (!newDeckId) return;
+                        
+                        const deckCards = cardsData[oldDeckId];
+                        deckCards.forEach(card => {
+                            const newCardId = this.generateId();
+                            const today = this.getToday();
+                            const MS_IN_DAY = 24 * 60 * 60 * 1000;
+                            
+                            const newCard = {
+                                ...card,
+                                id: newCardId,
+                                deckId: newDeckId,
+                                interval: this.importModal.importOptions.preserveProgress ? card.interval : 0,
+                                easeFactor: this.importModal.importOptions.preserveProgress ? card.easeFactor : 2.5,
+                                reviewCount: this.importModal.importOptions.preserveProgress ? card.reviewCount : 0,
+                                nextReview: this.importModal.importOptions.preserveProgress ? card.nextReview : today,
+                                lastReview: this.importModal.importOptions.preserveProgress ? card.lastReview : null,
+                                createdAt: Date.now()
+                            };
+                            
+                            this.cards[newDeckId].push(newCard);
+                        });
+                    });
+                    
+                    // Обновляем счетчики карточек
+                    this.updateDeckCounts();
+                    
+                    this.showNotification(`Импортировано ${decksData.length} колод`, 'success');
+                },
+                
+                // Экспорт отдельной колоды
+                exportDeck(deckId) {
+                    const deck = this.getDeckById(deckId);
+                    if (!deck) {
+                        alert('Колода не найдена');
+                        return;
+                    }
+                    
+                    const deckCards = this.cards[deckId] || [];
+                    
+                    const exportData = {
+                        formatVersion: "1.0",
+                        appName: "SRS Memorizer",
+                        exportType: "single_deck",
+                        exportedAt: new Date().toISOString(),
+                        data: {
+                            deck: {
+                                ...deck,
+                                // Удаляем временные поля
+                                cardCount: undefined,
+                                dueCount: undefined
+                            },
+                            cards: deckCards.map(card => ({
+                                ...card,
+                                // Удаляем временные ссылки
+                                deckId: undefined
+                            }))
+                        }
+                    };
+                    
+                    // Удаляем undefined полей
+                    const cleanData = JSON.parse(JSON.stringify(exportData));
+                    
+                    this.downloadJSON(cleanData, `srs_deck_${deck.name.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.json`);
+                },
+                
+                // Экспорт всех колод
+                exportAllDecks() {
+                    if (this.decks.length === 0) {
+                        alert('Нет данных для экспорта');
+                        return;
+                    }
+                    
+                    // Подготавливаем все карточки для экспорта
+                    const allCards = {};
+                    Object.keys(this.cards).forEach(deckId => {
+                        allCards[deckId] = this.cards[deckId].map(card => ({
+                            ...card,
+                            deckId: undefined // Удаляем привязку, восстановим при импорте
+                        }));
+                    });
+                    
+                    const exportData = {
+                        formatVersion: "1.0",
+                        appName: "SRS Memorizer",
+                        exportType: "full_backup",
+                        exportedAt: new Date().toISOString(),
+                        data: {
+                            decks: this.decks.map(deck => ({
+                                ...deck,
+                                cardCount: undefined,
+                                dueCount: undefined
+                            })),
+                            cards: allCards
+                        }
+                    };
+                    
+                    const cleanData = JSON.parse(JSON.stringify(exportData));
+                    this.downloadJSON(cleanData, `srs_backup_${Date.now()}.json`);
+                },
+                
+                // Экспорт в формат Anki
+                exportToAnkiFormat(deckId) {
+                    const deck = this.getDeckById(deckId);
+                    if (!deck) return;
+                    
+                    const deckCards = this.cards[deckId] || [];
+                    
+                    // Формат CSV, совместимый с Anki
+                    let csvContent = "Front;Back;Tags\n";
+                    
+                    deckCards.forEach(card => {
+                        const front = `"${card.front.replace(/"/g, '""')}"`;
+                        const back = `"${card.back.replace(/"/g, '""')}"`;
+                        const tags = card.tags.length > 0 ? card.tags.join(' ') : '';
+                        
+                        csvContent += `${front};${back};${tags}\n`;
+                    });
+                    
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `anki_${deck.name.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    
+                    URL.revokeObjectURL(url);
+                    
+                    this.showNotification(`Экспорт в формат Anki завершен!`, 'success');
+                },
+                
+                // Функция скачивания JSON файла
+                downloadJSON(data, filename) {
+                    const jsonStr = JSON.stringify(data, null, 2);
+                    const blob = new Blob([jsonStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    
+                    URL.revokeObjectURL(url);
+                    
+                    this.showNotification(`Экспорт завершен! Файл сохранен как "${filename}"`, 'success');
+                },
+                
+                // Вспомогательная функция для уведомлений
+                showNotification(message, type = 'info') {
+                    const alertClass = type === 'success' ? 'alert-success' : 
+                                      type === 'error' ? 'alert-danger' : 'alert-info';
+                    
+                    const toast = document.createElement('div');
+                    toast.className = `alert ${alertClass} position-fixed top-0 end-0 m-3`;
+                    toast.style.zIndex = '9999';
+                    toast.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'info-circle'} me-2"></i>${message}`;
+                    document.body.appendChild(toast);
+                    
+                    setTimeout(() => toast.remove(), 5000);
                 },
                 
                 // Методы для работы с колодами
@@ -1084,6 +1600,27 @@
             var dropdownElementList = [].slice.call(document.querySelectorAll('.dropdown-toggle'));
             var dropdownList = dropdownElementList.map(function (dropdownToggleEl) {
                 return new bootstrap.Dropdown(dropdownToggleEl);
+            });
+            
+            // Закрытие модального окна при клике вне его
+            document.addEventListener('click', function(event) {
+                const modal = document.querySelector('.modal.show');
+                if (modal && !modal.contains(event.target) && event.target.closest('.modal') === null) {
+                    const app = Alpine.$data(document.querySelector('[x-data="app"]'));
+                    if (app && app.importModal && app.importModal.show) {
+                        app.hideImportModal();
+                    }
+                }
+            });
+            
+            // Закрытие модального окна по Escape
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') {
+                    const app = Alpine.$data(document.querySelector('[x-data="app"]'));
+                    if (app && app.importModal && app.importModal.show) {
+                        app.hideImportModal();
+                    }
+                }
             });
         });
     </script>
