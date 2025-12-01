@@ -746,6 +746,9 @@
                     </div>
                 </div>
                 <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" @click="createExampleImportFile()">
+                        <i class="fas fa-download me-1"></i>Скачать пример
+                    </button>
                     <button type="button" class="btn btn-secondary btn-sm" @click="hideImportModal()">
                         Отмена
                     </button>
@@ -1025,36 +1028,35 @@
                         return { isValid: false, errors };
                     }
                     
-                    // Проверка версии формата
-                    if (!data.formatVersion || data.formatVersion !== '1.0') {
-                        errors.push('Неподдерживаемая версия формата');
+                    // Проверка версии формата (делаем не обязательной для обратной совместимости)
+                    if (!data.formatVersion) {
+                        // Для обратной совместимости, если нет version, считаем что это старый формат
+                        data.formatVersion = '0.9';
                     }
                     
                     // Проверка типа экспорта
                     if (!data.exportType) {
-                        errors.push('Отсутствует информация о типе экспорта');
-                    } else if (expectedType === 'deck' && data.exportType !== 'single_deck') {
-                        errors.push('Файл не является экспортом отдельной колоды');
-                    } else if (expectedType === 'backup' && data.exportType !== 'full_backup') {
-                        errors.push('Файл не является полной резервной копией');
-                    }
-                    
-                    // Проверка наличия данных
-                    if (!data.data) {
-                        errors.push('Отсутствуют данные для импорта');
-                    }
-                    
-                    // Проверка структуры для колоды
-                    if (data.exportType === 'single_deck') {
-                        if (!data.data.deck || !data.data.cards) {
-                            errors.push('Некорректная структура данных колоды');
+                        // Определяем тип экспорта автоматически по структуре
+                        if (data.deck && data.cards) {
+                            data.exportType = 'single_deck';
+                        } else if (data.decks && data.cards) {
+                            data.exportType = 'full_backup';
+                        } else {
+                            errors.push('Невозможно определить тип экспорта');
                         }
                     }
                     
-                    // Проверка структуры для резервной копии
-                    if (data.exportType === 'full_backup') {
-                        if (!Array.isArray(data.data.decks) || typeof data.data.cards !== 'object') {
-                            errors.push('Некорректная структура резервной копии');
+                    // Проверка наличия данных
+                    if (!data.data && !data.deck && !data.decks) {
+                        errors.push('Отсутствуют данные для импорта');
+                    }
+                    
+                    // Если это старый формат (версия 0.9), переносим данные в правильную структуру
+                    if (data.formatVersion === '0.9') {
+                        if (data.exportType === 'single_deck') {
+                            data.data = { deck: data.deck, cards: data.cards || [] };
+                        } else if (data.exportType === 'full_backup') {
+                            data.data = { decks: data.decks || [], cards: data.cards || {} };
                         }
                     }
                     
@@ -1073,18 +1075,41 @@
                     
                     const data = this.importModal.fileContent;
                     
-                    if (data.exportType === 'single_deck') {
-                        this.importDeckData(data.data);
-                    } else if (data.exportType === 'full_backup') {
-                        this.importBackupData(data.data);
+                    // Для совместимости с старыми версиями
+                    if (data.formatVersion === '0.9') {
+                        if (data.deck && data.cards) {
+                            // Это старый формат отдельной колоды
+                            data.exportType = 'single_deck';
+                            data.data = { deck: data.deck, cards: data.cards };
+                        } else if (data.decks && data.cards) {
+                            // Это старый формат полной копии
+                            data.exportType = 'full_backup';
+                            data.data = { decks: data.decks, cards: data.cards };
+                        }
                     }
                     
-                    this.hideImportModal();
-                    this.saveToLocalStorage();
-                    this.updateDeckCounts();
-                    
-                    // Показать уведомление об успехе
-                    this.showNotification('Импорт успешно завершен!', 'success');
+                    try {
+                        if (data.exportType === 'single_deck') {
+                            this.importDeckData(data.data);
+                        } else if (data.exportType === 'full_backup') {
+                            this.importBackupData(data.data);
+                        } else {
+                            throw new Error('Неподдерживаемый тип экспорта: ' + data.exportType);
+                        }
+                        
+                        this.hideImportModal();
+                        this.saveToLocalStorage();
+                        this.updateDeckCounts();
+                        
+                        // Показать уведомление об успехе
+                        this.showNotification('Импорт успешно завершен!', 'success');
+                        
+                        // Обновить текущий вид
+                        this.currentView = 'dashboard';
+                        
+                    } catch (error) {
+                        this.showNotification('Ошибка при импорте: ' + error.message, 'error');
+                    }
                 },
                 
                 // Импорт отдельной колоды
@@ -1094,13 +1119,22 @@
                     
                     // Генерируем новые ID для избежания конфликтов
                     const newDeckId = this.generateId();
-                    const idMap = {}; // Карта соответствия старых ID новым
+                    
+                    // Нормализуем теги колоды
+                    let deckTags = [];
+                    if (Array.isArray(deckData.tags)) {
+                        deckTags = deckData.tags;
+                    } else if (typeof deckData.tags === 'string') {
+                        deckTags = deckData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+                    }
                     
                     // Создаем новую колоду
                     const newDeck = {
-                        ...deckData,
                         id: newDeckId,
-                        createdAt: Date.now(),
+                        name: deckData.name || 'Без названия',
+                        description: deckData.description || '',
+                        tags: deckTags,
+                        createdAt: deckData.createdAt || Date.now(),
                         cardCount: cardsData.length,
                         dueCount: 0
                     };
@@ -1112,30 +1146,45 @@
                     this.cards[newDeckId] = [];
                     
                     // Импортируем карточки
+                    const today = this.getToday();
+                    
                     cardsData.forEach(card => {
                         const newCardId = this.generateId();
-                        idMap[card.id] = newCardId;
                         
-                        const today = this.getToday();
-                        const MS_IN_DAY = 24 * 60 * 60 * 1000;
+                        // Нормализуем теги карточки
+                        let cardTags = [];
+                        if (Array.isArray(card.tags)) {
+                            cardTags = card.tags;
+                        } else if (typeof card.tags === 'string') {
+                            cardTags = card.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+                        }
+                        
+                        // Устанавливаем интервал в зависимости от настроек импорта
+                        const preserveProgress = this.importModal.importOptions.preserveProgress;
                         
                         const newCard = {
-                            ...card,
                             id: newCardId,
                             deckId: newDeckId,
-                            // Сбрасываем или сохраняем прогресс в зависимости от настроек
-                            interval: this.importModal.importOptions.preserveProgress ? card.interval : 0,
-                            easeFactor: this.importModal.importOptions.preserveProgress ? card.easeFactor : 2.5,
-                            reviewCount: this.importModal.importOptions.preserveProgress ? card.reviewCount : 0,
-                            nextReview: this.importModal.importOptions.preserveProgress ? card.nextReview : today,
-                            lastReview: this.importModal.importOptions.preserveProgress ? card.lastReview : null,
-                            createdAt: Date.now()
+                            front: card.front || '',
+                            back: card.back || '',
+                            tags: cardTags,
+                            createdAt: card.createdAt || Date.now(),
+                            // Параметры SRS
+                            interval: preserveProgress ? (card.interval || 0) : 0,
+                            easeFactor: preserveProgress ? (card.easeFactor || 2.5) : 2.5,
+                            reviewCount: preserveProgress ? (card.reviewCount || 0) : 0,
+                            nextReview: preserveProgress ? (card.nextReview || today) : today,
+                            lastReview: preserveProgress ? card.lastReview : null
                         };
                         
                         this.cards[newDeckId].push(newCard);
                     });
                     
-                    this.showNotification(`Импортирована колода "${newDeck.name}" с ${cardsData.length} карточками`, 'success');
+                    // Обновляем счетчики
+                    this.updateDeckCounts();
+                    
+                    // Показываем новую колоду
+                    this.currentDeckId = newDeckId;
                 },
                 
                 // Импорт резервной копии
@@ -1153,17 +1202,29 @@
                     }
                     
                     const idMap = {}; // Карта соответствия старых ID новым для колод
+                    const today = this.getToday();
+                    const preserveProgress = this.importModal.importOptions.preserveProgress;
                     
                     // Импортируем колоды
                     decksData.forEach(deck => {
                         const newDeckId = this.generateId();
                         idMap[deck.id] = newDeckId;
                         
+                        // Нормализуем теги колоды
+                        let deckTags = [];
+                        if (Array.isArray(deck.tags)) {
+                            deckTags = deck.tags;
+                        } else if (typeof deck.tags === 'string') {
+                            deckTags = deck.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+                        }
+                        
                         const newDeck = {
-                            ...deck,
                             id: newDeckId,
-                            createdAt: Date.now(),
-                            cardCount: 0, // Будет обновлено после импорта карточек
+                            name: deck.name || 'Без названия',
+                            description: deck.description || '',
+                            tags: deckTags,
+                            createdAt: deck.createdAt || Date.now(),
+                            cardCount: 0,
                             dueCount: 0
                         };
                         
@@ -1176,22 +1237,30 @@
                         const newDeckId = idMap[oldDeckId];
                         if (!newDeckId) return;
                         
-                        const deckCards = cardsData[oldDeckId];
+                        const deckCards = cardsData[oldDeckId] || [];
                         deckCards.forEach(card => {
                             const newCardId = this.generateId();
-                            const today = this.getToday();
-                            const MS_IN_DAY = 24 * 60 * 60 * 1000;
+                            
+                            // Нормализуем теги карточки
+                            let cardTags = [];
+                            if (Array.isArray(card.tags)) {
+                                cardTags = card.tags;
+                            } else if (typeof card.tags === 'string') {
+                                cardTags = card.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+                            }
                             
                             const newCard = {
-                                ...card,
                                 id: newCardId,
                                 deckId: newDeckId,
-                                interval: this.importModal.importOptions.preserveProgress ? card.interval : 0,
-                                easeFactor: this.importModal.importOptions.preserveProgress ? card.easeFactor : 2.5,
-                                reviewCount: this.importModal.importOptions.preserveProgress ? card.reviewCount : 0,
-                                nextReview: this.importModal.importOptions.preserveProgress ? card.nextReview : today,
-                                lastReview: this.importModal.importOptions.preserveProgress ? card.lastReview : null,
-                                createdAt: Date.now()
+                                front: card.front || '',
+                                back: card.back || '',
+                                tags: cardTags,
+                                createdAt: card.createdAt || Date.now(),
+                                interval: preserveProgress ? (card.interval || 0) : 0,
+                                easeFactor: preserveProgress ? (card.easeFactor || 2.5) : 2.5,
+                                reviewCount: preserveProgress ? (card.reviewCount || 0) : 0,
+                                nextReview: preserveProgress ? (card.nextReview || today) : today,
+                                lastReview: preserveProgress ? card.lastReview : null
                             };
                             
                             this.cards[newDeckId].push(newCard);
@@ -1200,8 +1269,54 @@
                     
                     // Обновляем счетчики карточек
                     this.updateDeckCounts();
+                },
+                
+                // Создание примера файла импорта
+                createExampleImportFile() {
+                    const exampleData = {
+                        formatVersion: "1.0",
+                        appName: "SRS Memorizer",
+                        exportType: "single_deck",
+                        exportedAt: new Date().toISOString(),
+                        data: {
+                            deck: {
+                                id: "example_deck_123",
+                                name: "Пример колоды",
+                                description: "Это пример колоды для импорта",
+                                tags: ["пример", "тест"],
+                                createdAt: Date.now()
+                            },
+                            cards: [
+                                {
+                                    id: "card_1",
+                                    front: "Что такое HTML?",
+                                    back: "HyperText Markup Language - язык разметки гипертекста",
+                                    tags: ["html", "веб"],
+                                    createdAt: Date.now(),
+                                    interval: 1,
+                                    easeFactor: 2.5,
+                                    reviewCount: 0,
+                                    nextReview: Date.now(),
+                                    lastReview: null
+                                },
+                                {
+                                    id: "card_2",
+                                    front: "Что такое CSS?",
+                                    back: "Cascading Style Sheets - каскадные таблицы стилей",
+                                    tags: ["css", "стили"],
+                                    createdAt: Date.now(),
+                                    interval: 1,
+                                    easeFactor: 2.5,
+                                    reviewCount: 0,
+                                    nextReview: Date.now(),
+                                    lastReview: null
+                                }
+                            ]
+                        }
+                    };
                     
-                    this.showNotification(`Импортировано ${decksData.length} колод`, 'success');
+                    this.downloadJSON(exampleData, "example_import_deck.json");
+                    this.showNotification("Пример файла импорта создан!", "success");
                 },
                 
                 // Экспорт отдельной колоды
